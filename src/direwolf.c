@@ -466,6 +466,9 @@ int main (int argc, char *argv[])
 	    else if (strcasecmp(optarg, "EAS") == 0) {
 	      B_opt = 23456;	// See special case below.
 	    }
+	    else if (strcasecmp(optarg, "EOTD") == 0) {
+	      B_opt = 34567;	// See special case below.
+	    }
 	    else {
 	      B_opt = atoi(optarg);
 	    }
@@ -833,6 +836,12 @@ int main (int argc, char *argv[])
 	    audio_config.achan[0].mark_freq = 2083;	// Actually 2083.3 - logic 1.
 	    audio_config.achan[0].space_freq = 1563;	// Actually 1562.5 - logic 0.
 	    strlcpy (audio_config.achan[0].profiles, "A", sizeof(audio_config.achan[0].profiles));
+	  }
+	  else if (audio_config.achan[0].baud == 34567) {
+	    audio_config.achan[0].modem_type = MODEM_EOTD;
+	    audio_config.achan[0].baud = 1200;
+	    audio_config.achan[0].mark_freq = 1200;
+	    audio_config.achan[0].space_freq = 1800;
 	  }
 	  else {
             audio_config.achan[0].modem_type = MODEM_SCRAMBLE;
@@ -1657,6 +1666,7 @@ static void usage (char **argv)
 	dw_printf ("                     4800 bps uses 8PSK based on V.27 standard.\n");
 	dw_printf ("                     9600 bps and up uses K9NG/G3RUH standard.\n");
 	dw_printf ("                     AIS for ship Automatic Identification System.\n");
+	dw_printf ("                     EOTD for End-of-train devices.\n");
 	dw_printf ("                     EAS for Emergency Alert System (EAS) Specific Area Message Encoding (SAME).\n");
 	dw_printf ("    -g             Force G3RUH modem regardless of speed.\n");
 	dw_printf ("    -j             2400 bps QPSK compatible with direwolf <= 1.5.\n");
