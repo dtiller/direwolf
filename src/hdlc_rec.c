@@ -111,6 +111,12 @@ struct hdlc_state_s {
 	int eas_plus_found;		/* "+" seen, indicating end of geographical area list. */
 
 	int eas_fields_after_plus;	/* Number of "-" characters after the "+". */
+
+	uint64_t dpu_acc;		/* Accumulate most recent bits received for DPU */
+
+	int dpu_gathering;		/* Decoding in progress. */
+
+	int dpu_len;			/* DPU packet length */
 };
 
 static struct hdlc_state_s hdlc_state[MAX_CHANS][MAX_SUBCHANS][MAX_SLICERS];
@@ -399,6 +405,103 @@ a good modem here and providing a result when it is received.
 
 */
 
+#define DPU_BARKER_CODE	0x1b89a1ULL	// This includes start/parity/stop bits
+#define DPU_BARKER_MASK	0x3fffff
+#define DPU_FRAME_VALUE	0x01
+#define DPU_FRAME_MASK	0x401
+
+int is_dpu_valid(uint64_t c) {
+
+printf("is_valid %llx\n", c);
+	// nibble-wise parity - since we xor nibbles to get odd parity, this is even parity
+	static int parity[] = { 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0 };
+
+	// 1 0 start bit, 8 data bits, 1 odd parity bit, 1 1 stop bit
+	if ((c & DPU_FRAME_MASK) != DPU_FRAME_VALUE) {
+		return -1;
+	}
+
+	int framed_byte = c & 0x7ffULL;
+	int parity_bit = (framed_byte & 0x02) >> 1;
+	int upper_nibble = (framed_byte >> 6) & 0x0f;
+	int lower_nibble = (framed_byte >> 2) & 0x0f;
+
+printf("upper %d\n", upper_nibble);
+printf("lower %d\n", lower_nibble);
+	int expected_parity = parity[upper_nibble] ^ parity[lower_nibble];
+printf("after\n");
+	if (expected_parity == parity_bit) {
+	  return 0;
+	}
+	else {
+	  return 1;
+	}
+}
+
+static void dpu_rec_bit (int chan, int subchan, int slice, int raw, int future_use)
+{
+	struct hdlc_state_s *H;
+
+/*
+ * Different state information for each channel / subchannel / slice.
+ */
+	H = &hdlc_state[chan][subchan][slice];
+
+// Accumulate most recent 64 bits. (MSB first)
+
+	H->dpu_acc <<= 1;
+	H->dpu_acc |= raw;
+
+	int done = 0;
+
+	if (!H->dpu_gathering && (H->dpu_acc & DPU_BARKER_MASK) == DPU_BARKER_CODE) {
+dw_printf("Barker code found\n");
+	  H->dpu_gathering = 1;
+	  H->olen = 0;
+	  H->frame_len = 0;
+	  H->dpu_len = 0;
+	}
+	else if (H->dpu_gathering) {
+	  H->olen++;
+	  if (H->olen == 11) {
+	    H->olen = 0;
+	    if (is_dpu_valid(H->dpu_acc)) {
+	      unsigned char ch = (H->dpu_acc >> 2) & 0xffULL;
+printf("char %02x\n", ch);
+	      if (H->dpu_len == 0) {
+printf("setting length to %d\n", ch);
+	        H->dpu_len = ch;
+	      }
+	      else {
+	        H->frame_buf[H->frame_len++] = ch;
+	        //dw_printf ("frame_buf = %s\n", H->frame_buf);
+	        if (H->frame_len == H->dpu_len) {
+	          done = 1;
+	          H->dpu_gathering = 0;
+	          H->olen = 0;
+	          H->frame_len = 0;
+	          H->dpu_len = 0;
+	        }
+	      }
+	    }
+	    else {
+	      // Framing or parity error
+printf("Framing error\n");
+	      H->dpu_gathering = 0;
+	      H->olen = 0;
+	      H->frame_len = 0;
+	      H->dpu_len = 0;
+	    }
+	  }
+	}
+
+	if (done) {
+for (int i = 0; i < H->frame_len; i++) {
+printf("%02x ", H->frame_buf[i]);
+}
+printf("\n");
+	}
+}
 
 /***********************************************************************************
  *
@@ -460,6 +563,13 @@ void hdlc_rec_bit (int chan, int subchan, int slice, int raw, int is_scrambled, 
 
 	if (g_audio_p->achan[chan].modem_type == MODEM_EAS) {
 	  eas_rec_bit (chan, subchan, slice, raw, not_used_remove);
+	  return;
+	}
+
+// DPU does not use HDLC.
+
+	if (g_audio_p->achan[chan].modem_type == MODEM_DPU) {
+	  dpu_rec_bit (chan, subchan, slice, raw, not_used_remove);
 	  return;
 	}
 
