@@ -412,12 +412,12 @@ a good modem here and providing a result when it is received.
 
 int is_dpu_valid(uint64_t c) {
 
-printf("is_valid %llx\n", c);
-	// nibble-wise parity - since we xor nibbles to get odd parity, this is even parity
-	static int parity[] = { 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0 };
+	// nibble-wise odd parity
+	static int parity[] = { 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1 };
 
 	// 1 0 start bit, 8 data bits, 1 odd parity bit, 1 1 stop bit
 	if ((c & DPU_FRAME_MASK) != DPU_FRAME_VALUE) {
+printf("Bad framing\n");
 		return -1;
 	}
 
@@ -426,14 +426,12 @@ printf("is_valid %llx\n", c);
 	int upper_nibble = (framed_byte >> 6) & 0x0f;
 	int lower_nibble = (framed_byte >> 2) & 0x0f;
 
-printf("upper %d\n", upper_nibble);
-printf("lower %d\n", lower_nibble);
-	int expected_parity = parity[upper_nibble] ^ parity[lower_nibble];
-printf("after\n");
+	int expected_parity = !(parity[upper_nibble] ^ parity[lower_nibble]);
 	if (expected_parity == parity_bit) {
 	  return 0;
 	}
 	else {
+printf("Parity error\n");
 	  return 1;
 	}
 }
@@ -441,6 +439,7 @@ printf("after\n");
 static void dpu_rec_bit (int chan, int subchan, int slice, int raw, int future_use)
 {
 	struct hdlc_state_s *H;
+	static int byte_count;
 
 /*
  * Different state information for each channel / subchannel / slice.
@@ -455,38 +454,38 @@ static void dpu_rec_bit (int chan, int subchan, int slice, int raw, int future_u
 	int done = 0;
 
 	if (!H->dpu_gathering && (H->dpu_acc & DPU_BARKER_MASK) == DPU_BARKER_CODE) {
-dw_printf("Barker code found\n");
+dw_printf("Barker code found %llx\n", H->dpu_acc);
 	  H->dpu_gathering = 1;
 	  H->olen = 0;
 	  H->frame_len = 0;
 	  H->dpu_len = 0;
+	  byte_count = 4;
 	}
 	else if (H->dpu_gathering) {
 	  H->olen++;
 	  if (H->olen == 11) {
 	    H->olen = 0;
-	    if (is_dpu_valid(H->dpu_acc)) {
+	    if (is_dpu_valid(H->dpu_acc) == 0) {
 	      unsigned char ch = (H->dpu_acc >> 2) & 0xffULL;
-printf("char %02x\n", ch);
+//printf("char %02x\n", ch);
 	      if (H->dpu_len == 0) {
-printf("setting length to %d\n", ch);
-	        H->dpu_len = ch;
+	        H->dpu_len = ch & 0x3f;
+printf("setting length to %d\n", ch & 0x3f);
 	      }
 	      else {
 	        H->frame_buf[H->frame_len++] = ch;
+printf("byte %10d %x\n", byte_count++, ch);
 	        //dw_printf ("frame_buf = %s\n", H->frame_buf);
 	        if (H->frame_len == H->dpu_len) {
 	          done = 1;
 	          H->dpu_gathering = 0;
 	          H->olen = 0;
-	          H->frame_len = 0;
 	          H->dpu_len = 0;
 	        }
 	      }
 	    }
 	    else {
 	      // Framing or parity error
-printf("Framing error\n");
 	      H->dpu_gathering = 0;
 	      H->olen = 0;
 	      H->frame_len = 0;
