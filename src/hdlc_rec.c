@@ -453,6 +453,8 @@ static void dpu_rec_bit (int chan, int subchan, int slice, int raw, int future_u
 
 	int done = 0;
 
+printf("%d ", raw);
+
 	if (!H->dpu_gathering && (H->dpu_acc & DPU_BARKER_MASK) == DPU_BARKER_CODE) {
 dw_printf("Barker code found %llx\n", H->dpu_acc);
 	  H->dpu_gathering = 1;
@@ -469,8 +471,8 @@ dw_printf("Barker code found %llx\n", H->dpu_acc);
 	      unsigned char ch = (H->dpu_acc >> 2) & 0xffULL;
 //printf("char %02x\n", ch);
 	      if (H->dpu_len == 0) {
-	        H->dpu_len = ch & 0x3f;
-printf("setting length to %d\n", ch & 0x3f);
+	        H->dpu_len = (ch & 0x3f) / 2;
+printf("setting length to %d\n", H->dpu_len);
 	      }
 	      else {
 	        H->frame_buf[H->frame_len++] = ch;
@@ -495,10 +497,12 @@ printf("byte %10d %x\n", byte_count++, ch);
 	}
 
 	if (done) {
+// TODO: Vertical odd parity is done with Barker code + len-1 bytes. 
 for (int i = 0; i < H->frame_len; i++) {
 printf("%02x ", H->frame_buf[i]);
 }
 printf("\n");
+	H->frame_len = 0;
 	}
 }
 
