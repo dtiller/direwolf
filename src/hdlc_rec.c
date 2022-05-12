@@ -484,6 +484,7 @@ printf("byte %10d %x\n", byte_count++, ch);
 	          done = 1;
 	          H->dpu_gathering = 0;
 	          H->olen = 0;
+	    	  H->dpu_len = 0;
 	        }
 	      }
 	    }
@@ -498,19 +499,26 @@ printf("byte %10d %x\n", byte_count++, ch);
 	}
 
 	if (done) {
-// TODO: Vertical odd parity is done with Barker code + len-1 bytes. 
-	    int sum = 0x2d ^ (H->dpu_len + 3);	// parity of Barker bytes and length
 for (int i = 0; i < H->frame_len; i++) {
 printf("%02x ", H->frame_buf[i]);
 }
 printf("\n");
-	    for (int i = 0; i < H->frame_len - 1; i++) {
-printf("sum1=%02x ", sum);
+
+	    int sum = 0x2d ^ (H->frame_len + 3);	// parity of Barker bytes and length
+	    int len = H->frame_len - 1;
+
+	    for (int i = 0; i < len; i++) {
 	        sum ^= H->frame_buf[i];
-printf("sum2=%02x\n", sum);
 	    }
+
+	    if (sum != H->frame_buf[len]) {
+		printf("Vertical parity error\n");
+		return;
+	    }
+
+	    // TODO: Call the decode method
+
 	    H->frame_len = 0;
-	    H->dpu_len = 0;
 	}
 }
 
