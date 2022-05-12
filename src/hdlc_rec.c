@@ -112,7 +112,7 @@ struct hdlc_state_s {
 
 	int eas_fields_after_plus;	/* Number of "-" characters after the "+". */
 
-	uint64_t dpu_acc;		/* Accumulate most recent bits received for DPU */
+	uint32_t dpu_acc;		/* Accumulate most recent bits received for DPU */
 
 	int dpu_gathering;		/* Decoding in progress. */
 
@@ -405,12 +405,12 @@ a good modem here and providing a result when it is received.
 
 */
 
-#define DPU_BARKER_CODE	0x1b89a1ULL	// This includes start/parity/stop bits
-#define DPU_BARKER_MASK	0x3fffff
-#define DPU_FRAME_VALUE	0x01
-#define DPU_FRAME_MASK	0x401
+#define DPU_BARKER_CODE	0x8591d800	// This includes start/parity/stop bits
+#define DPU_BARKER_MASK	0xfffffc00
+#define DPU_FRAME_VALUE	0x80000000
+#define DPU_FRAME_MASK	0x80200000
 
-int is_dpu_valid(uint64_t c) {
+int is_dpu_valid(uint32_t c) {
 
 	// nibble-wise odd parity
 	static int parity[] = { 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1 };
@@ -421,10 +421,10 @@ printf("Bad framing\n");
 		return -1;
 	}
 
-	int framed_byte = c & 0x7ffULL;
-	int parity_bit = (framed_byte & 0x02) >> 1;
-	int upper_nibble = (framed_byte >> 6) & 0x0f;
-	int lower_nibble = (framed_byte >> 2) & 0x0f;
+	int framed_byte = (c >> 21)  & 0x7ff;
+	int parity_bit = (framed_byte >> 9) & 0x01;
+	int upper_nibble = (framed_byte >> 5) & 0x0f;
+	int lower_nibble = (framed_byte >> 1) & 0x0f;
 
 	int expected_parity = !(parity[upper_nibble] ^ parity[lower_nibble]);
 	if (expected_parity == parity_bit) {
@@ -446,17 +446,19 @@ static void dpu_rec_bit (int chan, int subchan, int slice, int raw, int future_u
  */
 	H = &hdlc_state[chan][subchan][slice];
 
-// Accumulate most recent 64 bits. (MSB first)
+// Accumulate most recent 32 bits.
 
-	H->dpu_acc <<= 1;
-	H->dpu_acc |= raw;
+	H->dpu_acc >>= 1;
+	if (raw) {
+		H->dpu_acc |= 0x80000000;
+	}
 
 	int done = 0;
 
 printf("%d ", raw);
 
 	if (!H->dpu_gathering && (H->dpu_acc & DPU_BARKER_MASK) == DPU_BARKER_CODE) {
-dw_printf("Barker code found %llx\n", H->dpu_acc);
+dw_printf("Barker code found %x\n", H->dpu_acc);
 	  H->dpu_gathering = 1;
 	  H->olen = 0;
 	  H->frame_len = 0;
@@ -468,10 +470,10 @@ dw_printf("Barker code found %llx\n", H->dpu_acc);
 	  if (H->olen == 11) {
 	    H->olen = 0;
 	    if (is_dpu_valid(H->dpu_acc) == 0) {
-	      unsigned char ch = (H->dpu_acc >> 2) & 0xffULL;
+	      unsigned char ch = (H->dpu_acc >> 22) & 0xff;
 //printf("char %02x\n", ch);
 	      if (H->dpu_len == 0) {
-	        H->dpu_len = (ch & 0x3f) / 2;
+	        H->dpu_len = (ch & 0x3f) - 3; // Includes len byte and barker bytes
 printf("setting length to %d\n", H->dpu_len);
 	      }
 	      else {
@@ -482,7 +484,6 @@ printf("byte %10d %x\n", byte_count++, ch);
 	          done = 1;
 	          H->dpu_gathering = 0;
 	          H->olen = 0;
-	          H->dpu_len = 0;
 	        }
 	      }
 	    }
@@ -498,11 +499,18 @@ printf("byte %10d %x\n", byte_count++, ch);
 
 	if (done) {
 // TODO: Vertical odd parity is done with Barker code + len-1 bytes. 
+	    int sum = 0x2d ^ (H->dpu_len + 3);	// parity of Barker bytes and length
 for (int i = 0; i < H->frame_len; i++) {
 printf("%02x ", H->frame_buf[i]);
 }
 printf("\n");
-	H->frame_len = 0;
+	    for (int i = 0; i < H->frame_len - 1; i++) {
+printf("sum1=%02x ", sum);
+	        sum ^= H->frame_buf[i];
+printf("sum2=%02x\n", sum);
+	    }
+	    H->frame_len = 0;
+	    H->dpu_len = 0;
 	}
 }
 
